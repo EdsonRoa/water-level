@@ -1,0 +1,136 @@
+#include "FirebaseESP8266.h"
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+#define BLYNK_PRINT Serial
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+ 
+char auth[] = "9WUpcO5xCTA9UchrfGbrrhhu_KTY1KOA";//Enter your Auth token
+#define FIREBASE_HOST "water-tank2-default-rtdb.firebaseio.com/" //Sin incluir http:// or https:// 
+#define FIREBASE_AUTH "xPHS2l8g3Ax8u5GdNQVd4Q2fJqG5kKUDwvWPdYCP"//Agregar secreto de la base de datos
+#define WIFI_SSID "Invitados"//Enter your WIFI name
+#define WIFI_PASSWORD "Manicomio"//Enter your WIFI password
+
+//Define FirebaseESP8266 data object
+FirebaseData firebaseData;
+FirebaseJson json;
+void printResult(FirebaseData &data);
+
+BlynkTimer timer;
+bool pinValue = 0;
+ 
+#define trig D3
+#define echo D4
+#define relay D5
+ 
+void setup() {
+  pinMode(trig, OUTPUT);
+  pinMode(echo, INPUT);
+  pinMode(relay, OUTPUT);
+  Wire.begin(D2, D1);
+  lcd.init();
+  lcd.backlight();
+  Serial.begin(115200);
+  Blynk.begin(auth, ssid, pass);
+  timer.setInterval(10L, Wlevel);
+  digitalWrite(relay, HIGH);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(300);
+  }
+  Serial.println();
+  Serial.print("Connected with IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+}
+ 
+BLYNK_WRITE(V0) {
+  pinValue = param.asInt();
+}
+ 
+void loop() {
+  Blynk.run();
+  timer.run();
+}
+ 
+void Wlevel() 
+{
+  if (pinValue == 1) {
+    digitalWrite(relay, LOW);
+    lcd.setCursor(0, 1);
+    lcd.print("Motor is ON ");
+  } else if (pinValue == 0) {
+    digitalWrite(relay, HIGH);
+    lcd.setCursor(0, 1);
+    lcd.print("Motor is OFF");
+  }
+
+  Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+  Firebase.reconnectWiFi(true);
+  //Set the size of WiFi rx/tx buffers in the case where we want to work with large data.
+  firebaseData.setBSSLBufferSize(1024, 1024);
+ //Set the size of HTTP response buffers in the case where we want to work with large data.
+  firebaseData.setResponseSize(1024);
+
+  //Set database read timeout to 1 minute (max 15 minutes)
+  Firebase.setReadTimeout(firebaseData, 1000 * 60);
+  //tiny, small, medium, large and unlimited.
+  //Size and its write timeout e.g. tiny (1s), small (10s), medium (30s) and large (60s).
+  Firebase.setwriteSizeLimit(firebaseData, "tiny");
+  //Setup to sense a nice looking saw tooth on the plotter
+ 
+  digitalWrite(trig, LOW);
+  delayMicroseconds(4);
+  digitalWrite(trig, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trig, LOW);
+  long t = pulseIn(echo, HIGH);
+  long cm = t / 29 / 2;
+
+  void printResult(FirebaseData &data)
+{
+  Serial.println();
+  FirebaseJson &json = data.jsonObject();
+  //Print all object data
+  Serial.println("Pretty printed JSON data:");
+  String jsonStr;
+  json.toString(jsonStr, true);
+  Serial.println(jsonStr);
+  Serial.println();
+  Serial.println("Iterate JSON data:");
+  //Serial.println();
+}
+
+void loop()
+{
+  String path = "/Test";
+  json.set("Water Level" + String(1), 100.0 * (3.3 * analogRead(A0)) / 1024);
+
+  Blynk.virtualWrite(V1, cm);
+  Serial.println(cm);
+  lcd.setCursor(0, 0);
+  lcd.print("Water Level: ");
+  lcd.print(cm);
+  lcd.print("   ");
+
+  if (Firebase.updateNode(firebaseData, path + "/valor", json))
+  {
+    //Serial.print("VALUE: ");
+    printResult(firebaseData);
+    Serial.println("------------------------------------");
+    Serial.println();
+  }
+  else
+  {
+    Serial.println("FAILED");
+    Serial.println("REASON: " + firebaseData.errorReason());
+    Serial.println("------------------------------------");
+    Serial.println();
+  }
+  delay(3000);  
+}
